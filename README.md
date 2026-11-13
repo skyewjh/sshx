@@ -35,7 +35,7 @@ sshx.bat    cmd / PowerShell 包装
 ## 安装
 
 ```bash
-git clone https://github.com/<you>/sshx.git
+git clone https://github.com/skyewjh/sshx.git
 cd sshx
 pip install -r requirements.txt       # 唯一依赖：paramiko >= 3.0
 
