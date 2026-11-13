@@ -1,26 +1,61 @@
-# sshx — 常驻 SSH 桥
+# sshx — 为 AI Agent 设计的常驻 SSH 桥
 
-一次连接，多次操作。SSH 会话交给常驻 daemon 持有，之后每条远端命令都是一行
-CLI，不必为每次探查重写 paramiko 脚本。
+一次连接，多次操作。
+
+AI agent（Hermes / Claude Code / Cursor / 自建 agent）做远端运维时，最常见的
+浪费是**每一步都重写一遍连接代码**：新建 `paramiko.SSHClient()`、认证、执行、
+读 stdout/stderr、猜退出码，然后下一轮对话再从零来一遍。
+
+`sshx` 把 SSH 会话留在常驻 daemon 里，把"连远端"降级成一条命令：
 
 ```bash
-sshx up root@10.0.0.21 -p YOUR_PASSWORD --as box   # 只连一次
-sshx run box 'ps aux | grep nginx'                 # 23 ms，复用同一条连接
+sshx up root@10.0.0.21 -p YOUR_PASSWORD --as box   # agent 只需要做一次
+sshx run box 'ps aux | grep nginx'                 # 之后每条命令 ~23 ms
 sshx run box 'systemctl status api' -t 30
 sshx run 'uptime'                                  # 省略 target = 最近用的那个
 ```
 
+## 为什么 agent 特别需要它
+
+| agent 的痛点 | sshx 的做法 |
+|---|---|
+| 每次探查都要生成一个新 `.py` 脚本 | 一条 `sshx run`，无需落地文件 |
+| 每次新建连接，250–300 ms 握手 + 认证 | daemon 复用连接，后续命令 ~20–30 ms |
+| 密码/token 要在每轮重新提供 | `--save` 后凭据留在 daemon，跨轮、跨进程复用 |
+| agent 得自己解析输出判断成败 | **退出码 = 远端退出码**（超时 124），不需要猜 |
+| stdout 里混着提示和状态 | 状态行走 stderr，`stdout` 是干净数据，可直接重定向/解析 |
+| 每次 tool call 是新进程，没有内存 | CLI 无状态，daemon 有状态——正好跨越进程边界 |
+| 需要先 bootstrap 才能用 | CLI 探不到 daemon 就自己 detached 拉起，零安装步骤 |
+
+关键点：**agent 的每个 tool call 都是独立进程，状态无处存放**。把连接放进
+daemon，等于给 agent 一个跨轮次存活的句柄。这就是它存在的理由。
+
+## 接进你的 agent
+
+把下面几行放进 `AGENTS.md` / `CLAUDE.md` / system prompt / skill 即可——之后
+agent 就不会再手写 paramiko 了：
+
+```markdown
+## 远程 SSH
+
+远端操作一律走 `sshx`，不要写 paramiko 脚本。
+
+- 首次连接：`sshx up user@host -p PASS --as NAME`（--save 可持久化凭据）
+- 之后执行：`sshx run NAME '命令'`，省略 NAME 即用最近连接
+- 长命令加 `-t 秒`；要后台跑用 `-d`（返回日志路径）
+- 传文件：`sshx put/get [NAME] 本地 远端`
+- 判断成败看退出码；stdout 是干净数据，状态行在 stderr
+```
+
 ## 为什么
 
-一次性 `exec_command` 用完即弃：每条命令都要付约 250–300 ms 的 TCP + SSH
-握手和认证，脚本化时还得反复写 `paramiko.SSHClient()` 样板。
-
-`sshx` 把连接留在后台进程里：
+一次性 `exec_command` 用完即弃：每条命令都付完整握手成本，脚本化时还要反复
+写样板。`sshx` 把连接留在后台进程里：
 
 - **复用**：同一目标的后续命令约 20–30 ms，只剩远端执行 + 本地 IPC
 - **保活**：transport 每 30 s 发 keepalive，掉线在下一条命令前自动重连
 - **一致**：多个 CLI 调用共享同一份凭据；`--save` 后 daemon 重启也能重建连接
-- **零配置启动**：CLI 探不到 daemon 就以 detached 进程拉起，不需要注册系统服务
+- **零配置启动**：CLI 探不到 daemon 就以 detached 进程拉起
 
 ## 结构
 
@@ -72,7 +107,7 @@ sshx ls / sshx ping box / sshx down box / sshx down --all / sshx stop
 一行 `[sshx box exit=0 0.023s]` 打在 stderr 上，所以
 
 ```bash
-sshx run box 'cat data.csv' > local.csv    # stdout 干净
+sshx run box 'cat data.csv' > local.csv    # stdout 干净，可直接解析
 ```
 
 ## 行为要点
