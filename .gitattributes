@@ -1,0 +1,4 @@
+# 仓库里是 shell / python / markdown 混合，统一 LF；
+# 只有 .bat 需要 CRLF，否则 cmd 解析异常。
+* text=auto eol=lf
+*.bat text eol=crlf

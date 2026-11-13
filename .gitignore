@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# 运行时状态（token / 凭据 / 日志）默认写 ~/.sshbridge，若有人改到本地目录也不要提交
+creds.json
+token
+bridge.log
+.sshbridge/

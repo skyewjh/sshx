@@ -1,0 +1,11 @@
+#!/bin/sh
+# sshx —— CLI 包装。解释器可用 SSHX_PY 覆盖（例如 SSHX_PY=python3.11）。
+DIR=$(cd "$(dirname "$0")" && pwd)
+if [ -n "$SSHX_PY" ]; then
+    PY="$SSHX_PY"
+elif command -v python >/dev/null 2>&1; then
+    PY=python
+else
+    PY=python3
+fi
+exec "$PY" "$DIR/sshx.py" "$@"
